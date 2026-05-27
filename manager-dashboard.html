@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CDC ToolTrack - Manager Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      background: #0f1117; color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      line-height: 1.6; padding: 20px;
+    }
+    .dashboard {
+      max-width: 1400px; margin: 0 auto;
+    }
+    .header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px;
+      border-bottom: 2px solid #30363d; padding-bottom: 16px;
+    }
+    .title { font-size: 32px; font-weight: 600; }
+    .status-badge { 
+      display: inline-block; padding: 8px 16px; border-radius: 24px;
+      font-size: 13px; font-weight: 600;
+    }
+    .status-badge.online { background: #238636; color: white; }
+    .status-badge.offline { background: #da3633; color: white; }
+    .grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px;
+      margin-bottom: 32px;
+    }
+    .card {
+      background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px;
+    }
+    .card-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .stat-number { font-size: 32px; font-weight: 700; color: #1f6feb; margin-bottom: 8px; }
+    .stat-label { color: #8b949e; font-size: 13px; }
+    .table {
+      width: 100%; border-collapse: collapse; font-size: 13px;
+    }
+    .table th {
+      background: #0d1b2a; padding: 12px; text-align: left; border-bottom: 1px solid #30363d;
+      font-weight: 600; color: #8b949e;
+    }
+    .table td {
+      padding: 12px; border-bottom: 1px solid #30363d;
+    }
+    .table tr:hover { background: #0d1b2a; }
+    .status-badge-small {
+      display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+    }
+    .status-available { background: #238636; color: white; }
+    .status-out { background: #0d419f; color: white; }
+    .sync-indicator {
+      display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px;
+    }
+    .sync-online { background: #238636; color: white; }
+    .sync-offline { background: #6e40aa; color: white; }
+    .refresh-btn {
+      background: #1f6feb; color: white; border: none; padding: 8px 16px;
+      border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 13px;
+    }
+    .refresh-btn:hover { background: #0d419f; }
+    .alert {
+      background: #3d2626; color: #f85149; padding: 12px; border-radius: 6px;
+      margin-bottom: 16px; font-size: 13px;
+    }
+    .empty { color: #8b949e; font-style: italic; }
+    h2 { font-size: 18px; font-weight: 600; margin: 24px 0 16px 0; }
+  </style>
+</head>
+<body>
+  <div class="dashboard">
+    <div class="header">
+      <div>
+        <div class="title">🏗️ CDC ToolTrack</div>
+        <div style="color: #8b949e; font-size: 13px; margin-top: 4px;">Manager Dashboard</div>
+      </div>
+      <div>
+        <span class="status-badge online" id="statusBadge">✅ Online</span>
+        <button class="refresh-btn" onclick="refreshData()" style="margin-left: 16px;">🔄 Refresh</button>
+      </div>
+    </div>
+
+    <div id="alert"></div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="card-title">🔧 Tools Status</div>
+        <div class="stat-number" id="availableCount">0</div>
+        <div class="stat-label">Available / <span id="totalTools">0</span> Total</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📤 Currently Checked Out</div>
+        <div class="stat-number" id="checkedOutCount">0</div>
+        <div class="stat-label">Tools in use across sites</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">👥 Active Users</div>
+        <div class="stat-number" id="activeUserCount">0</div>
+        <div class="stat-label">Currently logged in</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🏗️ Job Sites</div>
+        <div class="stat-number" id="siteCount">0</div>
+        <div class="stat-label">Active locations</div>
+      </div>
+    </div>
+
+    <h2>📤 Tools Checked Out</h2>
+    <div class="card">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Tool</th>
+            <th>Checked Out By</th>
+            <th>Site</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody id="checkoutTable">
+          <tr><td colspan="4" class="empty">No tools checked out</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>🔧 Tool Inventory</h2>
+    <div class="card">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Tool Name</th>
+            <th>Status</th>
+            <th>Location</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody id="toolsTable">
+          <tr><td colspan="4" class="empty">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>🏗️ Job Sites & Tools</h2>
+    <div id="sitesContainer"></div>
+
+    <h2>📋 Recent Activity</h2>
+    <div class="card">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Action</th>
+            <th>Tool</th>
+            <th>User</th>
+            <th>Site</th>
+          </tr>
+        </thead>
+        <tbody id="historyTable">
+          <tr><td colspan="5" class="empty">No activity</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js"></script>
+
+  <script>
+    // Firebase Config (SAME AS APP)
+    const firebaseConfig = {
+      apiKey: "AIzaSyDDaNFeThITc0JZXmFRjG-_vKhDEhQ9CBk",
+      authDomain: "cdc-tool-tracker.firebaseapp.com",
+      databaseURL: "https://cdc-tool-tracker-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "cdc-tool-tracker"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const ADMIN_USERS = [
+      {id:"adm-001", name:"Christophe Dinh", role:"Owner"},
+      {id:"adm-002", name:"Gordon Hawkes", role:"Manager"}
+    ];
+
+    const PERM = [
+      {id:"ps-001",name:"Peter Samson",role:"Permanent"},
+      {id:"ps-002",name:"Kalo Rano",role:"Permanent"},
+      {id:"ps-003",name:"Staff 3",role:"Permanent"},
+      {id:"ps-004",name:"Staff 4",role:"Permanent"},
+      {id:"ps-005",name:"Staff 5",role:"Permanent"},
+      {id:"ps-006",name:"Staff 6",role:"Permanent"},
+      {id:"ps-007",name:"Staff 7",role:"Permanent"},
+      {id:"ps-008",name:"Staff 8",role:"Permanent"},
+      {id:"ps-009",name:"Staff 9",role:"Permanent"},
+      {id:"ps-010",name:"Staff 10",role:"Permanent"},
+      {id:"ps-011",name:"Staff 11",role:"Permanent"},
+      {id:"ps-012",name:"Staff 12",role:"Permanent"}
+    ];
+
+    const ALL_USERS = [...ADMIN_USERS, ...PERM];
+
+    let dashboardData = {
+      tools: [],
+      checkouts: [],
+      logs: [],
+      sites: []
+    };
+
+    // Monitor online/offline
+    window.addEventListener('online', () => updateStatusBadge());
+    window.addEventListener('offline', () => updateStatusBadge());
+
+    function updateStatusBadge() {
+      const badge = document.getElementById('statusBadge');
+      if (navigator.onLine) {
+        badge.textContent = '✅ Online';
+        badge.className = 'status-badge online';
+      } else {
+        badge.textContent = '❌ Offline';
+        badge.className = 'status-badge offline';
+      }
+    }
+
+    function refreshData() {
+      if (!navigator.onLine) {
+        showAlert('❌ Offline - cannot refresh', 'error');
+        return;
+      }
+      
+      db.ref('data').once('value').then(snap => {
+        if (snap.val()) {
+          dashboardData = snap.val();
+          render();
+          showAlert('✅ Data refreshed', 'success');
+        }
+      }).catch(err => {
+        showAlert('❌ Error: ' + err.message, 'error');
+      });
+    }
+
+    function render() {
+      renderStats();
+      renderCheckouts();
+      renderTools();
+      renderSites();
+      renderHistory();
+    }
+
+    function renderStats() {
+      const available = dashboardData.tools.filter(t => !t.checkedOutBy).length;
+      const checkedOut = dashboardData.tools.filter(t => t.checkedOutBy).length;
+      const activeSites = new Set(dashboardData.tools.filter(t => t.checkedOutSite).map(t => t.checkedOutSite)).size;
+      
+      document.getElementById('availableCount').textContent = available;
+      document.getElementById('totalTools').textContent = dashboardData.tools.length;
+      document.getElementById('checkedOutCount').textContent = checkedOut;
+      document.getElementById('siteCount').textContent = dashboardData.sites.length;
+    }
+
+    function renderCheckouts() {
+      const tbody = document.getElementById('checkoutTable');
+      const checkedOut = dashboardData.tools.filter(t => t.checkedOutBy);
+      
+      if (checkedOut.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty">No tools checked out</td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = checkedOut.map(t => {
+        const user = ALL_USERS.find(u => u.id === t.checkedOutBy);
+        const site = dashboardData.sites.find(s => s.id === t.checkedOutSite);
+        const time = new Date(t.checkedOutAt).toLocaleString();
+        
+        return `
+          <tr>
+            <td>${t.name}</td>
+            <td>${user?.name || 'Unknown'}</td>
+            <td>${site?.name || 'Unknown'}</td>
+            <td>${time}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderTools() {
+      const tbody = document.getElementById('toolsTable');
+      
+      tbody.innerHTML = dashboardData.tools.map(t => {
+        const status = t.checkedOutBy ? 'Checked Out' : 'Available';
+        const statusClass = t.checkedOutBy ? 'status-out' : 'status-available';
+        const user = t.checkedOutBy ? ALL_USERS.find(u => u.id === t.checkedOutBy)?.name : 'Storage';
+        const site = t.checkedOutSite ? dashboardData.sites.find(s => s.id === t.checkedOutSite)?.name : 'Storage';
+        
+        return `
+          <tr>
+            <td>${t.name}</td>
+            <td><span class="status-badge-small ${statusClass}">${status}</span></td>
+            <td>${site || '-'}</td>
+            <td>${user || '-'}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderSites() {
+      const container = document.getElementById('sitesContainer');
+      
+      container.innerHTML = dashboardData.sites.map(site => {
+        const toolsOnSite = dashboardData.tools.filter(t => t.checkedOutSite === site.id);
+        
+        return `
+          <div class="card">
+            <div class="card-title">${site.name}</div>
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Tool</th>
+                  <th>User</th>
+                  <th>Since</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${toolsOnSite.length === 0 ? '<tr><td colspan="3" class="empty">No tools</td></tr>' : ''}
+                ${toolsOnSite.map(t => {
+                  const user = ALL_USERS.find(u => u.id === t.checkedOutBy);
+                  const time = new Date(t.checkedOutAt).toLocaleString();
+                  return `
+                    <tr>
+                      <td>${t.name}</td>
+                      <td>${user?.name || '-'}</td>
+                      <td>${time}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderHistory() {
+      const tbody = document.getElementById('historyTable');
+      const recent = [...(dashboardData.logs || [])].reverse().slice(0, 30);
+      
+      if (recent.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">No activity</td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = recent.map(log => {
+        const time = new Date(log.timestamp).toLocaleString();
+        const icon = log.action === 'CHECKOUT' ? '📤' : '📥';
+        
+        return `
+          <tr>
+            <td>${time}</td>
+            <td>${icon} ${log.action}</td>
+            <td>${log.toolName || '-'}</td>
+            <td>${log.userName || '-'}</td>
+            <td>${log.siteName || '-'}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function showAlert(msg, type) {
+      const alert = document.getElementById('alert');
+      alert.className = 'alert ' + type;
+      alert.textContent = msg;
+      setTimeout(() => alert.textContent = '', 4000);
+    }
+
+    // Auto-sync every 3 seconds
+    setInterval(() => {
+      if (navigator.onLine) refreshData();
+    }, 3000);
+
+    // Initial load
+    updateStatusBadge();
+    refreshData();
+  </script>
+</body>
+</html>

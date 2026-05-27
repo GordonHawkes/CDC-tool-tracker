@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CDC ToolTrack</title>
+  <meta name="theme-color" content="#0f1117"/>
+  <link rel="manifest" href="./manifest.json"/>
+  <meta name="description" content="Construction tool management and tracking system"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <link rel="apple-touch-icon" sizes="180x180" id="touch-icon"/>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      background: #0f1117; color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      line-height: 1.6; overflow-x: hidden;
+    }
+    .app { display: flex; flex-direction: column; height: 100vh; }
+    .header { 
+      background: linear-gradient(135deg, #0d1b2a 0%, #161b22 100%); 
+      padding: 12px 16px; border-bottom: 1px solid #30363d;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .header-title { 
+      font-size: 18px; font-weight: 600; flex: 1; text-align: center;
+    }
+    .user-button {
+      background: #1f6feb; color: white; border: none; padding: 8px 12px;
+      border-radius: 6px; cursor: pointer; font-size: 13px; display: flex;
+      align-items: center; gap: 8px;
+    }
+    .avatar { 
+      width: 24px; height: 24px; border-radius: 50%; display: flex;
+      align-items: center; justify-content: center; font-weight: bold;
+      font-size: 11px; background: #388bfd;
+    }
+    .content { flex: 1; overflow-y: auto; padding: 16px; }
+    .login-screen, .app-screen { display: none; }
+    .login-screen.active, .app-screen.active { display: flex; flex-direction: column; }
+    .login-screen { justify-content: center; align-items: center; }
+    .login-container { 
+      text-align: center; width: 100%; max-width: 400px;
+    }
+    .logo { width: 80px; height: 80px; margin: 0 auto 24px; border-radius: 12px; background: #1f6feb; display: flex; align-items: center; justify-content: center; font-size: 40px; }
+    .login-title { font-size: 24px; font-weight: 600; margin-bottom: 8px; }
+    .login-subtitle { color: #8b949e; margin-bottom: 24px; }
+    .staff-list { display: flex; flex-direction: column; gap: 12px; }
+    .staff-item { 
+      background: #161b22; border: 1px solid #30363d; padding: 16px; border-radius: 8px;
+      cursor: pointer; display: flex; align-items: center; gap: 12px;
+    }
+    .staff-item:active { background: #0d419f; }
+    .staff-avatar { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px; }
+    .staff-info { text-align: left; flex: 1; }
+    .staff-name { font-weight: 600; }
+    .staff-role { color: #8b949e; font-size: 13px; }
+    .tabs { 
+      display: flex; gap: 8px; border-bottom: 1px solid #30363d; padding: 0 16px;
+      overflow-x: auto; margin: -16px -16px 16px -16px; padding: 8px 16px;
+    }
+    .tab { 
+      padding: 8px 12px; cursor: pointer; border-radius: 6px; white-space: nowrap;
+      font-size: 13px; color: #8b949e; border: none; background: none;
+    }
+    .tab.active { background: #1f6feb; color: white; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .section-title { font-size: 13px; font-weight: 600; color: #8b949e; margin: 16px 0 8px 0; text-transform: uppercase; }
+    .input-group { margin-bottom: 12px; }
+    .input-group label { display: block; font-size: 13px; margin-bottom: 4px; }
+    .input-group input, .input-group select { 
+      width: 100%; padding: 8px 12px; background: #0d1b2a; border: 1px solid #30363d;
+      color: #e6edf3; border-radius: 6px; font-size: 14px;
+    }
+    .button-group { display: flex; gap: 8px; margin: 16px 0; }
+    .button { 
+      flex: 1; padding: 12px; background: #1f6feb; color: white; border: none;
+      border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600;
+    }
+    .button:active { background: #0d419f; }
+    .button.secondary { background: #30363d; }
+    .button.danger { background: #da3633; }
+    .tool-item, .log-item { 
+      background: #161b22; border: 1px solid #30363d; padding: 12px;
+      border-radius: 6px; margin-bottom: 8px;
+    }
+    .tool-item.checked-out { border-left: 4px solid #1f6feb; }
+    .tool-name { font-weight: 600; }
+    .tool-status { font-size: 12px; color: #8b949e; margin-top: 4px; }
+    .sync-indicator { 
+      position: fixed; bottom: 16px; right: 16px; padding: 8px 12px;
+      background: #238636; color: white; border-radius: 6px; font-size: 12px;
+      display: none; z-index: 1000;
+    }
+    .sync-indicator.syncing { display: block; background: #f0883e; }
+    .sync-indicator.error { display: block; background: #da3633; }
+    .sync-indicator.online { display: block; background: #238636; }
+    .storage-bar { 
+      background: #30363d; height: 8px; border-radius: 4px; margin: 8px 0;
+      overflow: hidden;
+    }
+    .storage-fill { background: #1f6feb; height: 100%; }
+    .alert { 
+      padding: 12px; border-radius: 6px; margin-bottom: 12px; font-size: 13px;
+    }
+    .alert.error { background: #3d2626; color: #f85149; }
+    .alert.success { background: #1a3a1a; color: #3fb950; }
+    .photo-preview { width: 100%; max-width: 200px; margin: 8px 0; border-radius: 6px; }
+    .modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: none; align-items: center; justify-content: center; z-index: 2000; }
+    .modal.active { display: flex; }
+    .modal-content { background: #161b22; border-radius: 8px; padding: 16px; max-width: 90vw; max-height: 90vh; overflow-y: auto; }
+    .modal-close { float: right; cursor: pointer; font-size: 24px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="header">
+      <div style="width: 40px;"></div>
+      <div class="header-title">CDC ToolTrack</div>
+      <button class="user-button" id="userBtn"></button>
+    </div>
+    <div class="content">
+      <!-- LOGIN SCREEN -->
+      <div class="login-screen active" id="loginScreen">
+        <div class="login-container">
+          <div class="logo">🔧</div>
+          <div class="login-title">CDC ToolTrack</div>
+          <div class="login-subtitle">Tap your name to sign in</div>
+          <div class="staff-list" id="staffList"></div>
+        </div>
+      </div>
+
+      <!-- APP SCREEN -->
+      <div class="app-screen" id="appScreen">
+        <div id="syncIndicator" class="sync-indicator">🔄 Syncing...</div>
+        
+        <div class="tabs" id="tabBar"></div>
+
+        <!-- CHECKOUT TAB -->
+        <div class="tab-content" id="checkoutTab">
+          <div class="section-title">📤 Check Out Tool</div>
+          <div class="input-group">
+            <label>Select Tool:</label>
+            <select id="checkoutTool">
+              <option value="">Choose a tool...</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>Site:</label>
+            <select id="checkoutSite">
+              <option value="">Choose a site...</option>
+            </select>
+          </div>
+          <button class="button" onclick="checkout()">✓ Check Out</button>
+        </div>
+
+        <!-- RETURN TAB -->
+        <div class="tab-content" id="returnTab">
+          <div class="section-title">📥 Return Tool</div>
+          <div id="myCheckouts"></div>
+          <button class="button secondary" onclick="refreshCheckouts()" style="margin-top: 16px;">🔄 Refresh</button>
+        </div>
+
+        <!-- TOOLS TAB -->
+        <div class="tab-content" id="toolsTab">
+          <div class="section-title">🔧 All Tools</div>
+          <div id="toolsList"></div>
+        </div>
+
+        <!-- STAFF TAB -->
+        <div class="tab-content" id="staffTab">
+          <div class="section-title">👥 Staff</div>
+          <div id="staffListApp"></div>
+        </div>
+
+        <!-- SITES TAB -->
+        <div class="tab-content" id="sitesTab">
+          <div class="section-title">🏗️ Job Sites</div>
+          <div id="sitesList"></div>
+        </div>
+
+        <!-- HISTORY TAB -->
+        <div class="tab-content" id="historyTab">
+          <div class="section-title">📋 Recent Activity</div>
+          <div id="historyList"></div>
+        </div>
+
+        <!-- SETTINGS TAB -->
+        <div class="tab-content" id="settingsTab">
+          <div id="storageErr"></div>
+          <div class="section-title">💾 Storage</div>
+          <div>Used: <span id="storageUsed">0</span>KB / <span id="storageTotal">0</span>KB</div>
+          <div class="storage-bar"><div class="storage-fill" id="storageFill" style="width: 0%"></div></div>
+          <button class="button secondary" onclick="exportData()" style="margin-top: 12px;">⬇️ Export Backup</button>
+          <button class="button secondary" onclick="document.getElementById('importFile').click()" style="margin-top: 8px;">⬆️ Import Backup</button>
+          <input type="file" id="importFile" style="display: none;" onchange="importData(event)">
+          <div class="section-title" style="margin-top: 24px;">📸 Photos</div>
+          <button class="button secondary" onclick="showPhotos()">View All Photos</button>
+          <div class="section-title" style="margin-top: 24px;">🔄 Sync Status</div>
+          <div id="syncStatus">✅ Online</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PHOTO MODAL -->
+  <div class="modal" id="photoModal">
+    <div class="modal-content">
+      <span class="modal-close" onclick="document.getElementById('photoModal').classList.remove('active')">✕</span>
+      <h3>📸 Photo Gallery</h3>
+      <div id="photoGallery"></div>
+    </div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/react-dom.production.min.js"></script>
+
+  <script>
+    // Firebase Config
+    const firebaseConfig = {
+      apiKey: "AIzaSyDDaNFeThITc0JZXmFRjG-_vKhDEhQ9CBk",
+      authDomain: "cdc-tool-tracker.firebaseapp.com",
+      databaseURL: "https://cdc-tool-tracker-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "cdc-tool-tracker"
+    };
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // Local Storage Keys
+    const KEY = "cdc_v7_firebase";
+    const ROLES = ["Owner","Manager","Foreman","Team Leader","Permanent","Temporary"];
+    const CAN_CHECKOUT_LEVEL = 2;
+
+    const ADMIN_USERS = [
+      {id:"adm-001", name:"Christophe Dinh", role:"Owner"},
+      {id:"adm-002", name:"Gordon Hawkes", role:"Manager"}
+    ];
+
+    const PERM = [
+      {id:"ps-001",name:"Peter Samson",role:"Permanent"},
+      {id:"ps-002",name:"Kalo Rano",role:"Permanent"},
+      {id:"ps-003",name:"Staff 3",role:"Permanent"},
+      {id:"ps-004",name:"Staff 4",role:"Permanent"},
+      {id:"ps-005",name:"Staff 5",role:"Permanent"},
+      {id:"ps-006",name:"Staff 6",role:"Permanent"},
+      {id:"ps-007",name:"Staff 7",role:"Permanent"},
+      {id:"ps-008",name:"Staff 8",role:"Permanent"},
+      {id:"ps-009",name:"Staff 9",role:"Permanent"},
+      {id:"ps-010",name:"Staff 10",role:"Permanent"},
+      {id:"ps-011",name:"Staff 11",role:"Permanent"},
+      {id:"ps-012",name:"Staff 12",role:"Permanent"}
+    ];
+
+    const ALL_USERS = [...ADMIN_USERS, ...PERM];
+
+    // State
+    let state = {
+      currentUserId: null,
+      tools: [],
+      checkouts: [],
+      logs: [],
+      sites: [],
+      photos: {}
+    };
+
+    let syncInProgress = false;
+    let lastSyncTime = 0;
+
+    // Initialize
+    function init() {
+      loadLocal();
+      renderLoginScreen();
+      setupFirebaseSync();
+      setupServiceWorker();
+    }
+
+    function setupServiceWorker() {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js').then(r => console.log('✅ SW')).catch(e => console.log('⚠️ SW:', e));
+      }
+    }
+
+    function setupFirebaseSync() {
+      // Monitor online/offline
+      window.addEventListener('online', () => {
+        updateSyncStatus();
+        syncToFirebase();
+      });
+      window.addEventListener('offline', () => updateSyncStatus());
+      updateSyncStatus();
+
+      // Sync from Firebase every 5 seconds
+      setInterval(() => {
+        if (navigator.onLine && state.currentUserId) {
+          syncFromFirebase();
+        }
+      }, 5000);
+    }
+
+    function updateSyncStatus() {
+      const status = navigator.onLine ? '✅ Online' : '❌ Offline';
+      document.getElementById('syncStatus').innerText = status;
+    }
+
+    async function syncFromFirebase() {
+      if (!navigator.onLine || syncInProgress) return;
+      syncInProgress = true;
+      showSyncIndicator('syncing');
+
+      try {
+        const snap = await db.ref('data').once('value');
+        if (snap.val()) {
+          state = { ...state, ...snap.val() };
+          saveLocal();
+          render();
+        }
+      } catch (err) {
+        console.error('Sync error:', err);
+        showSyncIndicator('error');
+      } finally {
+        syncInProgress = false;
+        if (navigator.onLine) showSyncIndicator('online');
+      }
+    }
+
+    async function syncToFirebase() {
+      if (!navigator.onLine || !state.currentUserId) return;
+      try {
+        await db.ref('data').set({
+          tools: state.tools,
+          checkouts: state.checkouts,
+          logs: state.logs,
+          sites: state.sites,
+          lastUpdated: new Date().toISOString(),
+          updatedBy: state.currentUserId
+        });
+      } catch (err) {
+        console.error('Upload error:', err);
+      }
+    }
+
+    function showSyncIndicator(type) {
+      const ind = document.getElementById('syncIndicator');
+      if (type === 'syncing') {
+        ind.textContent = '🔄 Syncing...';
+        ind.className = 'sync-indicator syncing';
+      } else if (type === 'error') {
+        ind.textContent = '⚠️ Sync Failed';
+        ind.className = 'sync-indicator error';
+        setTimeout(() => ind.style.display = 'none', 3000);
+      } else {
+        ind.textContent = '✅ Synced';
+        ind.className = 'sync-indicator online';
+        setTimeout(() => ind.style.display = 'none', 2000);
+      }
+    }
+
+    function saveLocal() {
+      try {
+        localStorage.setItem(KEY, JSON.stringify(state));
+      } catch(e) {
+        console.error('Storage error:', e);
+      }
+    }
+
+    function loadLocal() {
+      try {
+        const saved = localStorage.getItem(KEY);
+        if (saved) state = JSON.parse(saved);
+      } catch(e) {
+        console.error('Load error:', e);
+      }
+    }
+
+    function renderLoginScreen() {
+      const screen = document.getElementById('loginScreen');
+      const list = document.getElementById('staffList');
+      
+      screen.classList.add('active');
+      document.getElementById('appScreen').classList.remove('active');
+      
+      list.innerHTML = ALL_USERS.map(u => `
+        <div class="staff-item" onclick="login('${u.id}')">
+          <div class="staff-avatar" style="background: ${getColor(u.id)}">${u.name[0]}</div>
+          <div class="staff-info">
+            <div class="staff-name">${u.name}</div>
+            <div class="staff-role">${u.role}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function login(userId) {
+      state.currentUserId = userId;
+      saveLocal();
+      syncFromFirebase();
+      renderAppScreen();
+    }
+
+    function logout() {
+      state.currentUserId = null;
+      saveLocal();
+      renderLoginScreen();
+    }
+
+    function getColor(id) {
+      const colors = ['#0d66d0', '#1f6feb', '#388bfd', '#58a6ff', '#79c0ff', '#a5d6ff'];
+      return colors[id.charCodeAt(id.length-1) % colors.length];
+    }
+
+    function renderAppScreen() {
+      const screen = document.getElementById('appScreen');
+      const user = ALL_USERS.find(u => u.id === state.currentUserId);
+      
+      screen.classList.add('active');
+      document.getElementById('loginScreen').classList.remove('active');
+      
+      document.getElementById('userBtn').innerHTML = `<div class="avatar" style="background: ${getColor(user.id)}">${user.name[0]}</div> ${user.name.split(' ')[0]}`;
+      document.getElementById('userBtn').onclick = logout;
+
+      renderTabs();
+      selectTab('checkoutTab');
+      updateCheckoutSelects();
+      render();
+    }
+
+    function renderTabs() {
+      const tabBar = document.getElementById('tabBar');
+      const tabs = [
+        {id: 'checkoutTab', label: '📤 Checkout'},
+        {id: 'returnTab', label: '📥 Return'},
+        {id: 'toolsTab', label: '🔧 Tools'},
+        {id: 'staffTab', label: '👥 Staff'},
+        {id: 'sitesTab', label: '🏗️ Sites'},
+        {id: 'historyTab', label: '📋 History'},
+        {id: 'settingsTab', label: '⚙️ Settings'}
+      ];
+      
+      tabBar.innerHTML = tabs.map(t => `
+        <button class="tab" onclick="selectTab('${t.id}')">${t.label}</button>
+      `).join('');
+    }
+
+    function selectTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.getElementById(tabId).classList.add('active');
+      event.target.classList.add('active');
+      
+      if (tabId === 'toolsTab') renderTools();
+      else if (tabId === 'staffTab') renderStaff();
+      else if (tabId === 'sitesTab') renderSites();
+      else if (tabId === 'historyTab') renderHistory();
+      else if (tabId === 'returnTab') refreshCheckouts();
+    }
+
+    function updateCheckoutSelects() {
+      const toolSel = document.getElementById('checkoutTool');
+      const siteSel = document.getElementById('checkoutSite');
+      
+      toolSel.innerHTML = '<option value="">Choose...</option>' + state.tools.map(t => `
+        <option value="${t.id}" ${t.checkedOutBy ? 'disabled' : ''}>${t.name}${t.checkedOutBy ? ' (out)' : ''}</option>
+      `).join('');
+      
+      siteSel.innerHTML = '<option value="">Choose...</option>' + state.sites.map(s => `
+        <option value="${s.id}">${s.name}</option>
+      `).join('');
+    }
+
+    function checkout() {
+      const toolId = document.getElementById('checkoutTool').value;
+      const siteId = document.getElementById('checkoutSite').value;
+      const user = ALL_USERS.find(u => u.id === state.currentUserId);
+      
+      if (!toolId || !siteId) { alert('Select tool and site'); return; }
+      if (ROLES.indexOf(user.role) < CAN_CHECKOUT_LEVEL) { alert('Not authorized'); return; }
+      
+      const tool = state.tools.find(t => t.id === toolId);
+      if (tool.checkedOutBy) { alert('Tool already out'); return; }
+      
+      tool.checkedOutBy = state.currentUserId;
+      tool.checkedOutAt = new Date().toISOString();
+      tool.checkedOutSite = siteId;
+      
+      state.checkouts.push({
+        id: Math.random().toString(36).substr(2,9),
+        toolId, userId: state.currentUserId, siteId,
+        checkoutTime: tool.checkedOutAt,
+        returnTime: null
+      });
+      
+      state.logs.push({
+        timestamp: new Date().toISOString(),
+        action: 'CHECKOUT',
+        toolId, toolName: tool.name,
+        userId: state.currentUserId, userName: user.name,
+        siteId, siteName: state.sites.find(s => s.id === siteId).name
+      });
+      
+      saveLocal();
+      syncToFirebase();
+      updateCheckoutSelects();
+      alert('✓ Tool checked out');
+      document.getElementById('checkoutTool').value = '';
+      document.getElementById('checkoutSite').value = '';
+    }
+
+    function refreshCheckouts() {
+      const user = ALL_USERS.find(u => u.id === state.currentUserId);
+      const myTools = state.tools.filter(t => t.checkedOutBy === state.currentUserId);
+      const cont = document.getElementById('myCheckouts');
+      
+      if (myTools.length === 0) {
+        cont.innerHTML = '<p style="color: #8b949e;">No tools checked out</p>';
+        return;
+      }
+      
+      cont.innerHTML = myTools.map(t => {
+        const site = state.sites.find(s => s.id === t.checkedOutSite);
+        return `
+          <div class="tool-item checked-out">
+            <div class="tool-name">${t.name}</div>
+            <div class="tool-status">Site: ${site?.name || 'Unknown'}</div>
+            <div class="tool-status">Since: ${new Date(t.checkedOutAt).toLocaleString()}</div>
+            <button class="button" style="margin-top: 8px; background: #238636;" onclick="returnTool('${t.id}')">✓ Return</button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function returnTool(toolId) {
+      const tool = state.tools.find(t => t.id === toolId);
+      const user = ALL_USERS.find(u => u.id === state.currentUserId);
+      const site = state.sites.find(s => s.id === tool.checkedOutSite);
+      
+      tool.checkedOutBy = null;
+      tool.checkedOutAt = null;
+      tool.checkedOutSite = null;
+      
+      const co = state.checkouts.find(c => c.toolId === toolId && !c.returnTime);
+      if (co) co.returnTime = new Date().toISOString();
+      
+      state.logs.push({
+        timestamp: new Date().toISOString(),
+        action: 'RETURN',
+        toolId, toolName: tool.name,
+        userId: state.currentUserId, userName: user.name,
+        siteId: site.id, siteName: site.name
+      });
+      
+      saveLocal();
+      syncToFirebase();
+      updateCheckoutSelects();
+      refreshCheckouts();
+      alert('✓ Tool returned');
+    }
+
+    function renderTools() {
+      const cont = document.getElementById('toolsList');
+      cont.innerHTML = state.tools.map(t => `
+        <div class="tool-item ${t.checkedOutBy ? 'checked-out' : ''}">
+          <div class="tool-name">${t.name}</div>
+          <div class="tool-status">${t.checkedOutBy ? `Out to ${ALL_USERS.find(u => u.id === t.checkedOutBy)?.name}` : 'Available'}</div>
+          <div class="tool-status">Site: ${t.checkedOutSite ? state.sites.find(s => s.id === t.checkedOutSite)?.name : 'Storage'}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderStaff() {
+      const cont = document.getElementById('staffListApp');
+      cont.innerHTML = ALL_USERS.map(u => `
+        <div class="staff-item">
+          <div class="staff-avatar" style="background: ${getColor(u.id)}">${u.name[0]}</div>
+          <div class="staff-info">
+            <div class="staff-name">${u.name}</div>
+            <div class="staff-role">${u.role}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderSites() {
+      const cont = document.getElementById('sitesList');
+      cont.innerHTML = state.sites.map(s => {
+        const toolCount = state.tools.filter(t => t.checkedOutSite === s.id).length;
+        return `
+          <div class="tool-item">
+            <div class="tool-name">${s.name}</div>
+            <div class="tool-status">${toolCount} tool${toolCount !== 1 ? 's' : ''} on site</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderHistory() {
+      const cont = document.getElementById('historyList');
+      const recent = [...state.logs].reverse().slice(0, 50);
+      cont.innerHTML = recent.map(l => `
+        <div class="log-item">
+          <div style="font-weight: 600;">${l.action === 'CHECKOUT' ? '📤' : '📥'} ${l.toolName}</div>
+          <div class="tool-status">${l.userName} - ${l.siteName}</div>
+          <div class="tool-status">${new Date(l.timestamp).toLocaleString()}</div>
+        </div>
+      `).join('');
+    }
+
+    function render() {
+      updateStorage();
+    }
+
+    function updateStorage() {
+      const dataStr = JSON.stringify(state);
+      const used = Math.ceil(new Date(dataStr).length / 1024);
+      document.getElementById('storageUsed').textContent = used;
+      document.getElementById('storageTotal').textContent = '50000';
+      document.getElementById('storageFill').style.width = (used / 500) + '%';
+    }
+
+    function exportData() {
+      const exp = {exported: new Date().toISOString(), data: state};
+      const json = JSON.stringify(exp, null, 2);
+      const blob = new Blob([json], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `cdc-backup-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+    }
+
+    function importData(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const imp = JSON.parse(evt.target.result);
+          state = {...state, ...imp.data};
+          saveLocal();
+          syncToFirebase();
+          render();
+          alert('✓ Backup imported');
+        } catch (err) {
+          alert('Error importing: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function showPhotos() {
+      const modal = document.getElementById('photoModal');
+      const gallery = document.getElementById('photoGallery');
+      gallery.innerHTML = '<p>Photos will be stored here</p>';
+      modal.classList.add('active');
+    }
+
+    // Sample data
+    state.tools = [
+      {id: 't1', name: 'Drill', checkedOutBy: null},
+      {id: 't2', name: 'Saw', checkedOutBy: null},
+      {id: 't3', name: 'Hammer', checkedOutBy: null},
+      {id: 't4', name: 'Level', checkedOutBy: null},
+      {id: 't5', name: 'Tape Measure', checkedOutBy: null}
+    ];
+
+    state.sites = [
+      {id: 's1', name: 'Site A - Main Building'},
+      {id: 's2', name: 'Site B - Extension'},
+      {id: 's3', name: 'Site C - Parking'},
+      {id: 's4', name: 'Storage'}
+    ];
+
+    saveLocal();
+
+    // Start
+    init();
+  </script>
+</body>
+</html>
