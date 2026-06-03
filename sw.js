@@ -1,6 +1,6 @@
-/* CDC ToolTrack — Service Worker */
-const CACHE = 'cdctt-v1';
-const CORE = ['./index.html', './manifest.json', './sw.js'];
+/* CDC ToolTrack — Service Worker v2 */
+const CACHE = 'cdctt-v2';
+const CORE = ['./index.html', './manifest.json', './sw.js', './icon-192.png', './icon-512.png'];
 
 /* Install: cache core files */
 self.addEventListener('install', e => {
@@ -11,7 +11,7 @@ self.addEventListener('install', e => {
   );
 });
 
-/* Activate: clear old caches */
+/* Activate: clear ALL old caches and take control immediately */
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
@@ -20,19 +20,18 @@ self.addEventListener('activate', e => {
   );
 });
 
-/* Fetch: cache-first for own origin */
+/* Fetch: network-first so updates always get through */
 self.addEventListener('fetch', e => {
   if (!e.request.url.startsWith(self.location.origin)) return;
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      const network = fetch(e.request).then(res => {
+    fetch(e.request)
+      .then(res => {
         if (res.ok) {
           const clone = res.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone));
         }
         return res;
-      }).catch(() => cached);
-      return cached || network;
-    })
+      })
+      .catch(() => caches.match(e.request))
   );
 });
