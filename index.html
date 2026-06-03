@@ -7,6 +7,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
   <meta name="apple-mobile-web-app-title" content="CDC ToolTrack"/>
   <meta name="theme-color" content="#0f1117"/>
+  <link rel="manifest" href="manifest.json"/>
   <link rel="apple-touch-icon" sizes="180x180" id="touch-icon"/>
   <link rel="icon" type="image/png" id="favicon"/>
   <script>
@@ -361,34 +362,26 @@ const {useState,useEffect,useRef,useCallback} = React;
 const h = React.createElement;
 
 /* ══════════════════════════════════════════
-   STORAGE - Improved with IndexedDB fallback
+   STORAGE — IndexedDB (with localStorage migration)
 ══════════════════════════════════════════ */
 const KEY="cdc_v6";
-let db=null;
 
-// Initialize IndexedDB
-const initDB=async()=>{
-  return new Promise((res,rej)=>{
-    const req=indexedDB.open("CDCToolTrack",1);
-    req.onerror=()=>rej(req.error);
-    req.onsuccess=()=>{db=req.result;res(db);};
-    req.onupgradeneeded=(e)=>{
-      const d=e.target.result;
-      if(!d.objectStoreNames.contains("state"))d.createObjectStore("state");
-    };
-  });
+/* IndexedDB helpers */
+const dbPromise=new Promise((res,rej)=>{
+  const req=indexedDB.open("CDCToolTrack",1);
+  req.onerror=()=>rej(req.error);
+  req.onsuccess=()=>res(req.result);
+  req.onupgradeneeded=e=>{const d=e.target.result;if(!d.objectStoreNames.contains("state"))d.createObjectStore("state");};
+});
+
+const idbGet=async key=>{
+  const db=await dbPromise;
+  return new Promise((res,rej)=>{const tx=db.transaction("state","readonly");const r=tx.objectStore("state").get(key);r.onsuccess=()=>res(r.result??null);r.onerror=()=>rej(r.error);});
 };
-initDB().catch(e=>console.warn("IndexedDB init failed:",e));
 
-// Read data
-const rd=()=>{try{const r=localStorage.getItem(KEY);return r?JSON.parse(r):null;}catch{return null;}};
-
-// Write data with fallback
-const wr=s=>{
-  try{localStorage.setItem(KEY,JSON.stringify(s));return true;}catch(e){
-    console.warn("Storage full:",e);
-    return false;
-  }
+const idbSet=async(key,val)=>{
+  const db=await dbPromise;
+  return new Promise((res,rej)=>{const tx=db.transaction("state","readwrite");const r=tx.objectStore("state").put(val,key);r.onsuccess=()=>res();r.onerror=()=>rej(r.error);});
 };
 
 /* Migrate old data from any previous version */
@@ -401,6 +394,35 @@ function migOld(k,fb){
   return fb;
 }
 
+/* Load state: IndexedDB → localStorage migration → fresh */
+const loadState=async()=>{
+  try{
+    const saved=await idbGet(KEY);
+    if(saved){saved.staff=mergeStaff(saved.staff||[]);return saved;}
+  }catch(e){console.warn("IDB read failed:",e);}
+  // Migrate from localStorage if present
+  try{
+    const raw=localStorage.getItem(KEY);
+    if(raw){
+      const saved=JSON.parse(raw);
+      saved.staff=mergeStaff(saved.staff||[]);
+      idbSet(KEY,saved).then(()=>localStorage.removeItem(KEY)).catch(()=>{});
+      return saved;
+    }
+  }catch(e){console.warn("localStorage read failed:",e);}
+  // Fresh state
+  const tools=migOld("tools",[]);
+  return{
+    tools:tools.map(t=>({...t,activeCheckouts:t.activeCheckouts||[]})),
+    staff:mergeStaff(migOld("staff",[])),
+    logs:migOld("logs",[]),
+    sites:[{id:"all",name:"All Sites",isDefault:true},{id:"warehouse",name:"Main Warehouse",isWarehouse:true}],
+    activeSiteId:"all",
+    notifTime:"16:00",notifEnabled:false,
+    currentUserId:null
+  };
+};
+
 /* ══════════════════════════════════════════
    CONSTANTS
 ══════════════════════════════════════════ */
@@ -412,9 +434,7 @@ const PERM=[];
 const ADMIN_USERS=[{id:"adm-001",name:"Christophe Dinh",role:"Owner",photo:"",addedAt:"2025-01-01"},{id:"adm-002",name:"Gordon Hawkes",role:"Manager",photo:"",addedAt:"2025-01-01"}];
 const mergeStaff=saved=>{const ids=new Set(saved.map(s=>s.id));return[...saved,...PERM.filter(p=>!ids.has(p.id)),...ADMIN_USERS.filter(a=>!ids.has(a.id))];};
 
-function getInit(){
-  const saved=rd();
-  if(saved){saved.staff=mergeStaff(saved.staff||[]);return saved;}
+function freshState(){
   const tools=migOld("tools",[]);
   return{
     tools:tools.map(t=>({...t,activeCheckouts:t.activeCheckouts||[]})),
@@ -541,27 +561,31 @@ function LoginScreen({staff,onLogin}){
    MAIN APP
 ══════════════════════════════════════════ */
 function App(){
-  const [st,setSt]=useState(getInit);
+  const [st,setSt]=useState(null);  // null = loading
   const [tab,setTab]=useState("checkout");
   const [menu,setMenu]=useState(false);
   const [storageErr,setStorageErr]=useState(null);
   const notifRef=useRef(null);
 
+  // Load state from IndexedDB on mount
   useEffect(()=>{
-    const saveData=async()=>{
-      try{
-        const ok=wr(st);
-        if(!ok){
-          setStorageErr("⚠️ Storage full! Export your data NOW.");
-        }else{
-          setStorageErr(null);
-        }
-      }catch(e){
-        setStorageErr("Error saving: "+e.message);
-      }
-    };
-    saveData();
+    loadState().then(s=>setSt(s)).catch(()=>setSt(freshState()));
+  },[]);
+
+  // Save to IndexedDB whenever state changes
+  useEffect(()=>{
+    if(!st)return;
+    idbSet(KEY,st).then(()=>setStorageErr(null)).catch(()=>{
+      try{localStorage.setItem(KEY,JSON.stringify(st));setStorageErr(null);}
+      catch(e){setStorageErr("⚠️ Storage error! Export your data.");}
+    });
   },[st]);
+
+  // Show loading screen while state loads
+  if(!st) return h("div",{style:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#0f1117",gap:16}},
+    h("img",{src:LOGO,style:{width:72,opacity:.8},alt:"CDC"}),
+    h("div",{style:{color:"#f5c518",fontSize:14,fontWeight:700,letterSpacing:1}})
+  );
 
   /* 4pm notification */
   useEffect(()=>{
@@ -794,12 +818,12 @@ function App(){
 }
 
 /* ══════════════════════════════════════════
-   CHECKOUT TAB
+   CHECKOUT TAB  — multi-select tools
 ══════════════════════════════════════════ */
 function CheckoutTab({tools,staff,sites,activeSiteId,doCheckout,currentUser}){
   const [step,setStep]=useState("staff");
   const [sel,setSel]=useState(null);
-  const [selT,setSelT]=useState(null);
+  const [selTs,setSelTs]=useState([]);
   const [ss,setSs]=useState("");
   const [ts,setTs]=useState("");
 
@@ -807,68 +831,104 @@ function CheckoutTab({tools,staff,sites,activeSiteId,doCheckout,currentUser}){
   const sTools=activeSiteId==="all"?tools:tools.filter(t=>t.location===activeSiteId||t.siteId===activeSiteId);
   const avail=sTools.filter(t=>t.status==="available"||((!t.tracked)&&(t.outCount||0)<(t.quantity||1)));
   const fS=sStaff.filter(s=>s.name.toLowerCase().includes(ss.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name));
-  const fT=avail.filter(t=>t.name.toLowerCase().includes(ts.toLowerCase())||(t.toolId&&t.toolId.toLowerCase().includes(ts.toLowerCase())));
+  const fT=avail.filter(t=>t.name.toLowerCase().includes(ts.toLowerCase())||(t.toolId&&t.toolId.toLowerCase().includes(ts.toLowerCase()))).sort((a,b)=>a.name.localeCompare(b.name));
 
-  const reset=()=>{setStep("staff");setSel(null);setSelT(null);setSs("");setTs("");};
+  const reset=()=>{setStep("staff");setSel(null);setSelTs([]);setSs("");setTs("");};
 
+  const toggleTool=t=>setSelTs(p=>p.includes(t.id)?p.filter(id=>id!==t.id):[...p,t.id]);
+
+  /* Tools already out with this staff member */
+  const getAlreadyOut=s=>{
+    if(!s)return[];
+    const out=[];
+    tools.forEach(t=>{
+      if(t.tracked&&t.status==="checked_out"&&t.checkedOutTo===s.id)out.push({tool:t,label:t.name+(t.toolId?" ("+t.toolId+")":"")});
+      if(!t.tracked)(t.activeCheckouts||[]).filter(c=>String(c.staffId)===String(s.id)).forEach(()=>out.push({tool:t,label:t.name}));
+    });
+    return out;
+  };
+
+  const alreadyOut=sel?getAlreadyOut(sel):[];
+  const selectedToolObjs=selTs.map(id=>tools.find(t=>t.id===id)).filter(Boolean);
+
+  /* DONE */
   if(step==="done") return h("div",{style:{textAlign:"center",padding:"40px 16px"}},
     h("div",{style:{fontSize:52,marginBottom:12}},"✅"),
     h("div",{style:{fontSize:20,fontWeight:800,marginBottom:16,color:C.text}},"Checked Out!"),
-    h("div",{style:{background:C.surface,borderRadius:14,padding:16,marginBottom:24,display:"flex",gap:12,alignItems:"center"}},
-      h(Av,{p:sel,sz:46}),
-      h("div",{style:{textAlign:"left"}},
-        h("div",{style:{color:C.text,fontWeight:700}},sel.name),
-        h("div",{style:{display:"flex",gap:8,alignItems:"center",marginTop:4}},h(Th,{t:selT,sz:28}),h("span",{style:{color:C.yellow,fontSize:13}},selT.name),selT.toolId&&h("span",{style:{color:C.muted,fontSize:11}},selT.toolId))
-      )
-    ),
-    h(Btn,{onClick:reset,label:"Check Out Another"})
-  );
-
-  if(step==="confirm") return h("div",null,
-    h("div",{style:{background:C.surface,borderRadius:14,padding:16,marginBottom:16}},
-      h("div",{style:{color:C.muted,fontSize:11,fontWeight:700,letterSpacing:.8,marginBottom:12,textTransform:"uppercase"}},"Confirm Checkout"),
-      h("div",{style:{display:"flex",gap:12,alignItems:"center",marginBottom:12}},h(Av,{p:sel,sz:46}),h("div",null,h("div",{style:{color:C.muted,fontSize:10}},"TOOL GOING TO"),h("div",{style:{color:C.text,fontWeight:700,fontSize:15}},sel.name))),
-      h("div",{style:{borderTop:"1px solid "+C.border,paddingTop:12,display:"flex",gap:12,alignItems:"center"}},
-        h(Th,{t:selT,sz:46}),
-        h("div",null,
-          h("div",{style:{color:C.muted,fontSize:10}},"TOOL"),
-          h("div",{style:{color:C.text,fontWeight:700}},selT.name),
-          selT.toolId&&h("div",{style:{color:C.yellow,fontSize:12}},selT.toolId),
-          !selT.tracked&&h("div",{style:{color:C.muted,fontSize:12}},"Out: "+((selT.outCount||0)+1)+"/"+(selT.quantity||1))
+    h("div",{style:{background:C.surface,borderRadius:14,padding:16,marginBottom:24}},
+      h("div",{style:{display:"flex",gap:12,alignItems:"center",marginBottom:12,paddingBottom:12,borderBottom:"1px solid "+C.border}},
+        h(Av,{p:sel,sz:46}),
+        h("div",{style:{textAlign:"left"}},
+          h("div",{style:{color:C.text,fontWeight:700}},sel.name),
+          h("div",{style:{color:C.muted,fontSize:12}},selectedToolObjs.length+" tool"+(selectedToolObjs.length!==1?"s":"")+" signed out")
         )
       ),
-      h("div",{style:{color:C.muted,fontSize:11,marginTop:10}},"Signed out by: "+currentUser.name+" · "+new Date().toLocaleString())
+      h("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+        selectedToolObjs.map(t=>h("div",{key:t.id,style:{display:"flex",gap:10,alignItems:"center"}},
+          h(Th,{t,sz:28}),
+          h("span",{style:{color:C.yellow,fontSize:13,fontWeight:600}},t.name),
+          t.toolId&&h("span",{style:{color:C.muted,fontSize:11}},t.toolId)
+        ))
+      )
     ),
-    h("div",{style:{display:"flex",gap:8}},
-      h(Btn,{v:"ghost",onClick:()=>setStep("tool"),sx:{flex:1},label:"Back"}),
-      h(Btn,{onClick:()=>{doCheckout(sel,selT);setStep("done");},sx:{flex:2},label:"✅ Confirm Checkout"})
-    )
+    h(Btn,{onClick:reset,label:"Check Out More Tools"})
   );
 
+  /* TOOL SELECTION */
   if(step==="tool") return h("div",null,
     h("div",{style:{display:"flex",gap:10,alignItems:"center",marginBottom:14,background:C.surface,borderRadius:12,padding:"10px 12px"}},
-      h(Btn,{v:"ghost",sm:true,onClick:()=>setStep("staff"),label:"←"}),
-      h(Av,{p:sel,sz:34}),h("div",{style:{color:C.text,fontWeight:600}},sel.name)
+      h(Btn,{v:"ghost",sm:true,onClick:()=>{setStep("staff");setSelTs([]);},label:"←"}),
+      h(Av,{p:sel,sz:34}),
+      h("div",{style:{flex:1}},
+        h("div",{style:{color:C.text,fontWeight:700,fontSize:14}},sel.name),
+        selTs.length>0&&h("div",{style:{color:C.yellow,fontSize:11,fontWeight:700}},selTs.length+" selected")
+      )
     ),
-    h(Inp,{lbl:"Select Tool",placeholder:"Search tools or ID...",value:ts,onChange:x=>setTs(x.target.value)}),
+
+    /* Already has out */
+    alreadyOut.length>0&&h("div",{style:{marginBottom:14,background:C.orange+"11",border:"1px solid "+C.orange+"33",borderRadius:12,padding:"10px 14px"}},
+      h("div",{style:{color:C.orange,fontWeight:700,fontSize:11,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}},"Currently has out ("+alreadyOut.length+"):"),
+      h("div",{style:{display:"flex",flexDirection:"column",gap:6}},
+        alreadyOut.map((item,i)=>h("div",{key:i,style:{display:"flex",gap:8,alignItems:"center"}},
+          h(Th,{t:item.tool,sz:22}),
+          h("span",{style:{color:C.text,fontSize:12}},item.label)
+        ))
+      )
+    ),
+
+    h(Inp,{lbl:"Select Tools to Check Out",placeholder:"Search tools or ID...",value:ts,onChange:x=>setTs(x.target.value)}),
     fT.length===0&&h("div",{style:{textAlign:"center",padding:24,color:C.muted,fontSize:13}},"No available tools"),
-    h("div",{style:{display:"flex",flexDirection:"column",gap:8,maxHeight:360,overflowY:"auto"}},
-      fT.map(t=>h("div",{key:t.id,onClick:()=>{setSelT(t);setStep("confirm");},
-        style:{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:12,cursor:"pointer",display:"flex",gap:12,alignItems:"center"},
-        onMouseOver:x=>x.currentTarget.style.borderColor=C.yellow,onMouseOut:x=>x.currentTarget.style.borderColor=C.border},
-        h(Th,{t,sz:46}),
-        h("div",{style:{flex:1}},
-          h("div",{style:{color:C.text,fontWeight:700}},t.name),
-          h("div",{style:{display:"flex",gap:8,marginTop:2,flexWrap:"wrap"}},
-            t.toolId&&h("span",{style:{color:C.yellow,fontSize:11,fontWeight:700}},t.toolId),
-            !t.tracked&&h("span",{style:{color:C.muted,fontSize:11}},"Stock: "+((t.quantity||1)-(t.outCount||0))+" avail")
+
+    h("div",{style:{display:"flex",flexDirection:"column",gap:8,maxHeight:selTs.length>0?260:360,overflowY:"auto"}},
+      fT.map(t=>{
+        const isSel=selTs.includes(t.id);
+        return h("div",{key:t.id,onClick:()=>toggleTool(t),
+          style:{background:isSel?C.yellow+"22":C.surface,border:"2px solid "+(isSel?C.yellow:C.border),borderRadius:12,padding:12,cursor:"pointer",display:"flex",gap:12,alignItems:"center"},
+          onMouseOver:x=>{if(!isSel)x.currentTarget.style.borderColor=C.yellow;},
+          onMouseOut:x=>{if(!isSel)x.currentTarget.style.borderColor=C.border;}},
+          h(Th,{t,sz:46}),
+          h("div",{style:{flex:1}},
+            h("div",{style:{color:C.text,fontWeight:700}},t.name),
+            h("div",{style:{display:"flex",gap:8,marginTop:2,flexWrap:"wrap"}},
+              t.toolId&&h("span",{style:{color:C.yellow,fontSize:11,fontWeight:700}},t.toolId),
+              !t.tracked&&h("span",{style:{color:C.muted,fontSize:11}},"Stock: "+((t.quantity||1)-(t.outCount||0))+" avail")
+            )
+          ),
+          h("div",{style:{width:28,height:28,borderRadius:14,flexShrink:0,background:isSel?C.yellow:"transparent",border:"2px solid "+(isSel?C.yellow:C.muted),display:"flex",alignItems:"center",justifyContent:"center"}},
+            isSel&&h("div",{style:{color:"#111",fontWeight:900,fontSize:15}},"✓")
           )
-        ),
-        h("div",{style:{color:C.yellow,fontSize:20}},"›")
-      ))
+        );
+      })
+    ),
+
+    /* Sticky checkout button */
+    selTs.length>0&&h("div",{style:{marginTop:12,position:"sticky",bottom:0,background:C.bg,paddingTop:8,paddingBottom:4}},
+      h(Btn,{onClick:()=>{selectedToolObjs.forEach(t=>doCheckout(sel,t));setStep("done");},
+        label:"✅ Check Out "+selTs.length+" Tool"+(selTs.length!==1?"s":"")+" → "+sel.name.split(" ")[0]})
     )
   );
 
+  /* STAFF SELECTION */
   return h("div",null,
     h("div",{style:{color:C.muted,fontSize:11,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",marginBottom:10}},"Signing tool out to:"),
     h(Inp,{placeholder:"Search by name...",value:ss,onChange:x=>setSs(x.target.value)}),
@@ -877,7 +937,7 @@ function CheckoutTab({tools,staff,sites,activeSiteId,doCheckout,currentUser}){
       fS.map(s=>{
         const col=avc(s.name);
         const has=tools.some(t=>(t.checkedOutTo===s.id&&t.status==="checked_out")||((t.activeCheckouts||[]).some(c=>c.staffId===s.id)));
-        return h("div",{key:s.id,onClick:()=>{setSel(s);setStep("tool");},
+        return h("div",{key:s.id,onClick:()=>{setSel(s);setStep("tool");setSelTs([]);},
           style:{background:C.surface,border:"2px solid "+(has?C.orange+"55":C.border),borderRadius:14,padding:"14px 8px 10px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:7,textAlign:"center"},
           onMouseOver:x=>x.currentTarget.style.borderColor=col,onMouseOut:x=>x.currentTarget.style.borderColor=has?C.orange+"55":C.border},
           h(Av,{p:s,sz:58}),
@@ -902,6 +962,9 @@ function ReturnTab({tools,staff,doReturn,doReturnAll}){
   const [search,setSearch]=useState("");
   const [flash,setFlash]=useState("");
   const [bulkDone,setBulkDone]=useState(false);
+  const [bulkQueue,setBulkQueue]=useState([]);   // remaining items in bulk flow
+  const [bulkTotal,setBulkTotal]=useState(0);    // total tools in this bulk run
+  const isBulk=bulkTotal>0;                      // are we in bulk-return mode?
 
   /* Build per-staff item list - includes BOTH tracked and count-only */
   const getItems=s=>{
@@ -929,20 +992,37 @@ function ReturnTab({tools,staff,doReturn,doReturnAll}){
 
   const confirmReturn=()=>{
     doReturn(condItem.tool,selStaff,cond,notes,condItem.checkoutId);
-    setFlash(condItem.tool.name+(cond==="good"?" returned ✅":cond==="damaged"?" — damaged ⚠️":" — retired 🗑️"));
-    setCondItem(null);setTimeout(()=>setFlash(""),3000);
+    const msg=condItem.tool.name+(cond==="good"?" returned ✅":cond==="damaged"?" — damaged ⚠️":" — retired 🗑️");
+    if(isBulk&&bulkQueue.length>0){
+      /* More tools in the bulk queue — move to next */
+      setFlash(msg);setTimeout(()=>setFlash(""),2000);
+      setCondItem(bulkQueue[0]);
+      setBulkQueue(q=>q.slice(1));
+      setCond(null);setNotes("");
+    } else if(isBulk){
+      /* Last tool in bulk queue — show completion */
+      setCondItem(null);setBulkQueue([]);setBulkTotal(0);
+      setBulkDone(true);
+      setTimeout(()=>{setBulkDone(false);setSelStaff(null);},3000);
+    } else {
+      /* Individual return */
+      setCondItem(null);setFlash(msg);setTimeout(()=>setFlash(""),3000);
+    }
   };
 
   const returnAll=()=>{
-    doReturnAll(myItems,selStaff);
-    setBulkDone(true);
-    setTimeout(()=>{setBulkDone(false);setSelStaff(null);},2500);
+    if(myItems.length===0)return;
+    /* Start guided bulk return — condition-check each tool */
+    setBulkTotal(myItems.length);
+    setBulkQueue(myItems.slice(1));
+    setCond(null);setNotes("");
+    setCondItem(myItems[0]);
   };
 
   if(bulkDone) return h("div",{style:{textAlign:"center",padding:"48px 16px"}},
     h("div",{style:{fontSize:60,marginBottom:12}},"✅"),
     h("div",{style:{fontSize:20,fontWeight:800,color:C.text,marginBottom:6}},"All Tools Returned!"),
-    h("div",{style:{color:C.muted,fontSize:13}},"All marked as Good condition")
+    h("div",{style:{color:C.muted,fontSize:13}},"All tools checked and returned")
   );
 
   if(!selStaff) return h("div",null,
@@ -986,10 +1066,10 @@ function ReturnTab({tools,staff,doReturn,doReturnAll}){
       :h("div",null,
           h("div",{style:{background:C.green+"11",border:"1px solid "+C.green+"33",borderRadius:12,padding:14,marginBottom:14,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}},
             h("div",null,
-              h("div",{style:{color:C.green,fontWeight:700,fontSize:14}},"✅ All tools in good order?"),
-              h("div",{style:{color:C.muted,fontSize:12,marginTop:2}},"Return everything at once")
+              h("div",{style:{color:C.green,fontWeight:700,fontSize:14}},"📋 Return all "+myItems.length+" tool"+(myItems.length!==1?"s":"")+"?"),
+              h("div",{style:{color:C.muted,fontSize:12,marginTop:2}},"Check condition of each one")
             ),
-            h(Btn,{v:"success",onClick:returnAll,label:"Return All ✓"})
+            h(Btn,{v:"success",onClick:returnAll,label:"Return All →"})
           ),
           h("div",{style:{color:C.muted,fontSize:11,fontWeight:700,letterSpacing:.8,textTransform:"uppercase",marginBottom:10}},"Or tap to return individually:"),
           h("div",{style:{display:"flex",flexDirection:"column",gap:10}},
@@ -1008,14 +1088,19 @@ function ReturnTab({tools,staff,doReturn,doReturnAll}){
           )
         ),
 
-    condItem&&h(Mdl,{title:"Return Tool",onClose:()=>setCondItem(null)},
+    condItem&&h(Mdl,{title:isBulk?"Return All — Tool "+(bulkTotal-bulkQueue.length)+" of "+bulkTotal:"Return Tool",onClose:()=>{setCondItem(null);setBulkQueue([]);setBulkTotal(0);}},
+      flash&&h("div",{style:{background:C.green+"22",border:"1px solid "+C.green+"44",borderRadius:8,padding:"8px 12px",marginBottom:12,color:C.green,fontSize:13,fontWeight:600}},flash),
       h("div",{style:{display:"flex",gap:12,alignItems:"center",background:C.surface,borderRadius:12,padding:14,marginBottom:16}},
         h(Th,{t:condItem.tool,sz:52}),
-        h("div",null,h("div",{style:{color:C.text,fontWeight:700,fontSize:15}},condItem.tool.name),condItem.tool.toolId&&h("div",{style:{color:C.yellow,fontSize:12}},condItem.tool.toolId),condItem.isCountOnly&&h("div",{style:{color:C.blue,fontSize:11}},"Count-only item"))
+        h("div",null,
+          h("div",{style:{color:C.text,fontWeight:700,fontSize:15}},condItem.tool.name),
+          condItem.tool.toolId&&h("div",{style:{color:C.yellow,fontSize:13,fontWeight:700}},"🏷️ "+condItem.tool.toolId),
+          condItem.isCountOnly&&h("div",{style:{color:C.blue,fontSize:11}},"Count-only item")
+        )
       ),
       condItem.tool.tracked
         ?h("div",null,
-            h("div",{style:{color:C.text,fontWeight:700,marginBottom:12}},"Condition?"),
+            h("div",{style:{color:C.text,fontWeight:700,marginBottom:12}},"What condition is it in?"),
             [{val:"good",icon:"✅",label:"Good — Working Fine",col:C.green},{val:"damaged",icon:"⚠️",label:"Damaged — Out of Service",col:C.orange},{val:"retire",icon:"🗑️",label:"Beyond Repair — Retire",col:C.red}].map(o=>
               h("div",{key:o.val,onClick:()=>setCond(o.val),style:{background:cond===o.val?o.col+"22":C.surface,border:"2px solid "+(cond===o.val?o.col:C.border),borderRadius:12,padding:"12px 16px",cursor:"pointer",display:"flex",gap:12,alignItems:"center",marginBottom:8}},
                 h("span",{style:{fontSize:22}},o.icon),h("span",{style:{color:cond===o.val?o.col:C.text,fontWeight:600}},o.label)
@@ -1025,8 +1110,8 @@ function ReturnTab({tools,staff,doReturn,doReturnAll}){
           )
         :h("div",{style:{background:C.green+"11",border:"1px solid "+C.green+"33",borderRadius:12,padding:14,color:C.green,marginBottom:8}},"✅ Count item — will reduce the tally by 1"),
       h("div",{style:{display:"flex",gap:8,marginTop:12}},
-        h(Btn,{v:"ghost",onClick:()=>setCondItem(null),sx:{flex:1},label:"Cancel"}),
-        h(Btn,{onClick:confirmReturn,dis:condItem.tool.tracked&&!cond,sx:{flex:2},label:"Confirm Return"})
+        h(Btn,{v:"ghost",onClick:()=>{setCondItem(null);setBulkQueue([]);setBulkTotal(0);},sx:{flex:1},label:isBulk?"Stop":"Cancel"}),
+        h(Btn,{onClick:confirmReturn,dis:condItem.tool.tracked&&!cond,sx:{flex:2},label:isBulk&&bulkQueue.length>0?"Confirm & Next →":"Confirm Return"})
       )
     )
   );
@@ -1043,7 +1128,7 @@ function ToolsTab({tools,setTools,staff,logs,sites,activeSiteId,siteOpts}){
   const [form,setForm]=useState({name:"",tracked:true,qty:1,photo:"",cat:"",notes:"",location:"all",isCompanyTool:true});
 
   const sTools=activeSiteId==="all"?tools:tools.filter(t=>t.location===activeSiteId||t.siteId===activeSiteId);
-  const shown=sTools.filter(t=>(filt==="all"||t.status===filt)&&(t.name.toLowerCase().includes(srch.toLowerCase())||(t.toolId&&t.toolId.toLowerCase().includes(srch.toLowerCase()))));
+  const shown=sTools.filter(t=>(filt==="all"||t.status===filt)&&(t.name.toLowerCase().includes(srch.toLowerCase())||(t.toolId&&t.toolId.toLowerCase().includes(srch.toLowerCase())))).sort((a,b)=>a.name.localeCompare(b.name));
   const upd=(id,p)=>setTools(ts=>ts.map(t=>t.id===id?{...t,...p}:t));
 
   const addTool=()=>{
@@ -1366,7 +1451,7 @@ function SettingsTab({st,upd,setSt,setStaff,exportData,importData,storageErr}){
 
   const clearAll=()=>{
     if(confirm("Delete ALL tools, logs and data? Permanent staff will be restored. Cannot be undone.")){
-      const fresh=getInit();fresh.tools=[];fresh.logs=[];fresh.currentUserId=null;
+      const fresh=freshState();fresh.tools=[];fresh.logs=[];fresh.currentUserId=null;
       setSt(fresh);
     }
   };
@@ -1431,9 +1516,9 @@ function SettingsTab({st,upd,setSt,setStaff,exportData,importData,storageErr}){
     ),
 
     h("div",{style:{background:C.surface,borderRadius:14,padding:16,marginBottom:14}},
-      h("div",{style:{color:C.text,fontWeight:700,fontSize:15,marginBottom:6}},"📱 Offline App"),
+      h("div",{style:{color:C.text,fontWeight:700,fontSize:15,marginBottom:6}},"📱 Install as App"),
       h("div",{style:{color:C.muted,fontSize:12,lineHeight:1.6}},
-        "This app runs fully offline. Open the HTML file in your browser whenever you need it — all data is stored on this device."
+        "Tap your browser's Share/Menu button and choose \"Add to Home Screen\" to install CDC ToolTrack as a proper app on this device. Data is stored locally using IndexedDB — handles hundreds of MB. Works fully offline."
       )
     ),
 
@@ -1443,6 +1528,13 @@ function SettingsTab({st,upd,setSt,setStaff,exportData,importData,storageErr}){
       h(Btn,{v:"danger",onClick:clearAll,label:"Reset All Data"})
     )
   );
+}
+
+/* Register Service Worker for offline/installable PWA */
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('sw.js').catch(e=>console.warn('SW registration failed:',e));
+  });
 }
 
 ReactDOM.createRoot(document.getElementById("app")).render(h(App));

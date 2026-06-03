@@ -1,101 +1,38 @@
-// Service Worker for CDC ToolTrack PWA
-const CACHE_NAME = 'cdc-tooltrack-v1';
-const URLS_TO_CACHE = [
-  './',
-  './index.html',
-  './manifest.json'
-];
+/* CDC ToolTrack — Service Worker */
+const CACHE = 'cdctt-v1';
+const CORE = ['./index.html', './manifest.json', './sw.js'];
 
-// Install event - cache files
-self.addEventListener('install', event => {
-  console.log('Service Worker installing...');
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => {
-      console.log('Cache opened');
-      return cache.addAll(URLS_TO_CACHE).catch(err => {
-        console.log('Some resources failed to cache, continuing anyway:', err);
-      });
-    }).catch(err => {
-      console.log('Cache open failed, continuing:', err);
-    })
+/* Install: cache core files */
+self.addEventListener('install', e => {
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(CORE))
+      .then(() => self.skipWaiting())
   );
-  self.skipWaiting();
 });
 
-// Activate event - clean up old caches
-self.addEventListener('activate', event => {
-  console.log('Service Worker activating...');
-  event.waitUntil(
-    caches.keys().then(cacheNames => {
-      return Promise.all(
-        cacheNames.map(cacheName => {
-          if (cacheName !== CACHE_NAME) {
-            console.log('Deleting old cache:', cacheName);
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
+/* Activate: clear old caches */
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-// Fetch event - serve from cache, fall back to network
-self.addEventListener('fetch', event => {
-  // Skip non-GET requests
-  if (event.request.method !== 'GET') {
-    return;
-  }
-
-  event.respondWith(
-    caches.match(event.request).then(response => {
-      // Return cached version if available
-      if (response) {
-        return response;
-      }
-
-      // Try to fetch from network
-      return fetch(event.request).then(response => {
-        // Only cache successful responses
-        if (!response || response.status !== 200 || response.type !== 'basic') {
-          return response;
+/* Fetch: cache-first for own origin */
+self.addEventListener('fetch', e => {
+  if (!e.request.url.startsWith(self.location.origin)) return;
+  e.respondWith(
+    caches.match(e.request).then(cached => {
+      const network = fetch(e.request).then(res => {
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
         }
-
-        // Clone the response
-        const responseToCache = response.clone();
-
-        caches.open(CACHE_NAME).then(cache => {
-          cache.put(event.request, responseToCache);
-        });
-
-        return response;
-      }).catch(err => {
-        // If offline and no cache, return a simple offline page
-        console.log('Fetch failed, serving offline version:', err);
-        // Return cached index if available, otherwise null
-        return caches.match('./index.html');
-      });
+        return res;
+      }).catch(() => cached);
+      return cached || network;
     })
   );
-});
-
-// Handle background sync for data when coming online
-self.addEventListener('sync', event => {
-  if (event.tag === 'sync-data') {
-    event.waitUntil(
-      // Notify clients that data should sync
-      self.clients.matchAll().then(clients => {
-        clients.forEach(client => {
-          client.postMessage({type: 'SYNC_DATA'});
-        });
-      })
-    );
-  }
-});
-
-// Listen for messages from clients
-self.addEventListener('message', event => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
 });
